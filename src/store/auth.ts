@@ -8,7 +8,7 @@
  * The server (src/server/keys.ts) is the only intended writer: it applies
  * shape validation before setAuthVar and env precedence on top of
  * authVars(). Ordinary reads never throw (absent/corrupt file = {} =
- * "no keys yet"); custom-only pair reads/writes below are deliberately
+ * "no keys yet"); every write (ordinary and custom-only) is deliberately
  * strict so an unreadable private record is never overwritten as {}.
  * Ordinary writes preserve unknown string vars verbatim
  * (forward-compat: future entries — e.g. a plans-login token — ride along
@@ -36,6 +36,18 @@ function readMap(): Record<string, string> {
 	}
 }
 
+/** Same projection as readMap, but an unreadable or non-object file throws
+ *  (absent = {}), so a write never rebuilds a hand-edited file from {}. */
+function readStoredMap(): Record<string, string> {
+	let text: string;
+	try { text = fs.readFileSync(AUTH_FILE, "utf8"); }
+	catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}; throw new Error("Authorization storage unavailable"); }
+	let raw: unknown;
+	try { raw = JSON.parse(text); } catch { throw new Error("Authorization storage unavailable"); }
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Authorization storage unavailable");
+	return Object.fromEntries(Object.entries(raw).filter(([, v]) => typeof v === "string") as [string, string][]);
+}
+
 /** Write the map atomically at mode 0600: a partial write must never
  *  leave a 0644 file (secrets) or a truncated JSON (looks like "no keys").
  *  atomic-write.ts sets the mode on the temp file before the rename, so
@@ -51,13 +63,13 @@ export const authStore: AuthStore = {
 	},
 	setAuthVar(name, value) {
 		assertOrdinaryVar(name);
-		const map = readMap();
+		const map = readStoredMap();
 		map[name] = value;
 		writeMap(map);
 	},
 	deleteAuthVar(name) {
 		assertOrdinaryVar(name);
-		const map = readMap();
+		const map = readStoredMap();
 		if (!(name in map)) return; // absent = silent success, idempotent
 		delete map[name];
 		writeMap(map);
