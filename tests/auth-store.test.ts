@@ -64,6 +64,18 @@ describe("AuthStore adapter", () => {
 		assert.deepEqual(authStore.authVars(), { OK: "fine" }, "non-string values drop");
 	});
 
+	it("set/delete refuse a corrupt/non-object file and leave its bytes alone", () => {
+		for (const bytes of ['{"KEEP": "me",}', JSON.stringify(["an", "array"]), "null"]) {
+			fs.writeFileSync(AUTH_FILE, bytes);
+			assert.throws(() => authStore.setAuthVar("OPENROUTER_API_KEY", "sk-or-v1-new"), /Authorization storage unavailable/);
+			assert.throws(() => authStore.deleteAuthVar("KEEP"), /Authorization storage unavailable/);
+			assert.equal(fs.readFileSync(AUTH_FILE, "utf8"), bytes);
+		}
+		fs.rmSync(AUTH_FILE);
+		authStore.setAuthVar("OPENROUTER_API_KEY", "sk-or-v1-new");
+		assert.deepEqual(authStore.authVars(), { OPENROUTER_API_KEY: "sk-or-v1-new" }, "absent file still starts from {}");
+	});
+
 	it("delete removes just that var; absent delete = silent no-op", () => {
 		fs.writeFileSync(AUTH_FILE, JSON.stringify({ A: "1", B: "2" }));
 		authStore.deleteAuthVar("A");
